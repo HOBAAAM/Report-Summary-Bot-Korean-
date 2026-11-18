@@ -2,13 +2,14 @@ name: Daily analyst report digest
 
 on:
   schedule:
-    # 평일 06:17 KST (= UTC 전날 21:17, 일~목). 정각은 GitHub 혼잡으로 지연이 잦아 17분.
-    # 직전 영업일 리포트 전체를 수집 → 출근길(07시 전후)에 Notion 브리핑 완성
-    - cron: "17 21 * * 0-4"
+    # 평일 08:50 KST (= UTC 전날 23:50, 일~목)
+    # 그날 아침까지 업로드된 리포트를 수집 → 장 시작 전후 Notion 브리핑 완성
+    # (GitHub 예약 실행은 혼잡 시 수~수십 분 늦게 시작될 수 있음)
+    - cron: "50 23 * * 0-4"
   workflow_dispatch:          # Actions 탭에서 수동 실행 가능
     inputs:
       date:
-        description: "대상 날짜 (YYYY-MM-DD, 비우면 직전 영업일)"
+        description: "대상 날짜 (YYYY-MM-DD, 비우면 오늘)"
         required: false
 
 concurrency:
