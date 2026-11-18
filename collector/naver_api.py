@@ -89,16 +89,30 @@ class NaverResearchClient:
             f"https://stock.naver.com/api/stockSecurity/items/v2/domestic/{item_code}/profile"
         ).json()
 
-    def download(self, url: str, dest) -> int:
-        """PDF를 dest 경로로 저장하고 바이트 수 반환."""
-        self._throttle()
-        with self.session.get(url, timeout=60, stream=True) as resp:
-            resp.raise_for_status()
-            tmp = dest.with_suffix(dest.suffix + ".part")
-            size = 0
-            with open(tmp, "wb") as f:
-                for chunk in resp.iter_content(64 * 1024):
-                    f.write(chunk)
-                    size += len(chunk)
-            tmp.replace(dest)
-        return size
+    def download(self, url: str, dest, attempts: int = 3) -> int:
+        """PDF를 dest 경로로 저장하고 바이트 수 반환.
+
+        CDN이 오류 페이지(HTML)를 200으로 돌려주는 경우가 있어 내용이 실제 PDF인지 확인하고,
+        아니면 간격을 두고 재시도한다. 끝내 실패하면 ValueError.
+        """
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        last = ""
+        for i in range(attempts):
+            if i:
+                time.sleep(3 * i)
+            self._throttle()
+            with self.session.get(url, timeout=60, stream=True) as resp:
+                resp.raise_for_status()
+                size = 0
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_content(64 * 1024):
+                        f.write(chunk)
+                        size += len(chunk)
+            with open(tmp, "rb") as f:
+                head = f.read(1024)
+            if b"%PDF" in head:
+                tmp.replace(dest)
+                return size
+            last = head[:60].decode("utf-8", "replace").replace("\n", " ")
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"PDF가 아닌 응답 ({last!r})")

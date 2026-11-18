@@ -84,11 +84,13 @@ class Run:
         total = 0.0
         for r in todo:
             route = self.routes[r["category"]]
-            if route.source == "pdf" and r.get("pdf_path") and (ROOT / r["pdf_path"]).exists():
-                pages = min(len(PdfReader(ROOT / r["pdf_path"]).pages), route.max_pages)
-                tin = pages * TOKENS_PER_PDF_PAGE + 1500
-            else:
-                tin = 1500 + len(r.get("summary_text") or "") * 2
+            tin = 1500 + len(r.get("summary_text") or "") * 2
+            if route.source == "pdf" and r.get("pdf_path"):
+                try:
+                    pages = min(len(PdfReader(ROOT / r["pdf_path"]).pages), route.max_pages)
+                    tin = pages * TOKENS_PER_PDF_PAGE + 1500
+                except Exception:  # noqa: BLE001 — 깨진 PDF는 요약문 기준으로 추정
+                    pass
             tout = 1500 if route.effort == "low" else 3000
             p_in, p_out = PRICES[route.model]
             total += (tin * p_in + tout * p_out) / 1e6

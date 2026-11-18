@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,8 @@ import anthropic
 from pypdf import PdfReader, PdfWriter
 
 from .prompts import SYSTEM_PROMPT, build_user_text, schema_for
+
+log = logging.getLogger(__name__)
 
 # 1M 토큰당 USD (입력, 출력) ─ 비용 계산용. 배치는 50% 할인.
 PRICES = {
@@ -82,16 +85,18 @@ def build_params(report: dict, route: Route, root: Path):
     content, pages = [], (None, None)
     text_only = route.source != "pdf" or not report.get("pdf_path")
     if not text_only:
-        pdf_path = root / report["pdf_path"]
-        if not pdf_path.exists():
-            raise SummarizeError(f"PDF 파일 없음: {report['pdf_path']}")
-        pdf, total, sent = load_pdf(pdf_path, route.max_pages)
-        pages = (total, sent)
-        content.append({
-            "type": "document",
-            "source": {"type": "base64", "media_type": "application/pdf",
-                       "data": base64.standard_b64encode(pdf).decode("ascii")},
-        })
+        try:
+            pdf, total, sent = load_pdf(root / report["pdf_path"], route.max_pages)
+            pages = (total, sent)
+            content.append({
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf",
+                           "data": base64.standard_b64encode(pdf).decode("ascii")},
+            })
+        except Exception as e:  # noqa: BLE001 — PDF가 없거나 깨졌으면 요약문 기반으로 대체
+            log.warning("PDF 사용 불가 → 요약문으로 대체 (%s-%s): %s",
+                        report["category"], report["nid"], e)
+            text_only = True
     user_text = build_user_text(report, text_only)
     if pages[0] and pages[1] < pages[0]:
         user_text += f"\n(참고: 전체 {pages[0]}페이지 중 앞 {pages[1]}페이지만 첨부됨)"

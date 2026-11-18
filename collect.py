@@ -81,7 +81,7 @@ def run(date: str, config: dict, dry_run: bool, download_pdf: bool) -> list:
     collected = load_json(out_file, [])  # 같은 날 재실행 시 이어붙이기
     pdf_dir = DATA / "pdfs" / date
 
-    stats = {"listed": 0, "matched": 0, "new": 0, "failed": 0}
+    stats = {"listed": 0, "matched": 0, "new": 0, "failed": 0, "pdf_ok": 0, "pdf_fail": 0}
 
     for category, rule in (config.get("categories") or {}).items():
         if not rule or not rule.get("enabled"):
@@ -120,9 +120,14 @@ def run(date: str, config: dict, dry_run: bool, download_pdf: bool) -> list:
                 if download_pdf and report.pdf_url:
                     pdf_dir.mkdir(parents=True, exist_ok=True)
                     dest = pdf_dir / pdf_filename(report)
-                    if not dest.exists():
-                        client.download(report.pdf_url, dest)
-                    report.pdf_path = str(dest.relative_to(ROOT))
+                    try:
+                        if not dest.exists():
+                            client.download(report.pdf_url, dest)
+                        report.pdf_path = str(dest.relative_to(ROOT))
+                        stats["pdf_ok"] += 1
+                    except Exception as e:  # noqa: BLE001 — PDF 없이도 리포트는 저장 (요약문 기반 요약)
+                        stats["pdf_fail"] += 1
+                        log.warning("  PDF 다운로드 실패 nid=%s: %s", report.nid, e)
 
                 collected.append(report.to_dict())
                 seen.add(report.nid)
@@ -140,8 +145,9 @@ def run(date: str, config: dict, dry_run: bool, download_pdf: bool) -> list:
             save_json(STATE_FILE, state)
             save_json(SECTOR_CACHE, sectors)
 
-    log.info("완료 %s ─ 조회 %d / 필터 %d / 신규 저장 %d / 실패 %d",
-             date, stats["listed"], stats["matched"], stats["new"], stats["failed"])
+    log.info("완료 %s ─ 조회 %d / 필터 %d / 신규 저장 %d / 실패 %d · PDF 정상 %d / 실패 %d",
+             date, stats["listed"], stats["matched"], stats["new"], stats["failed"],
+             stats["pdf_ok"], stats["pdf_fail"])
     return collected
 
 
