@@ -81,12 +81,19 @@ def pct(v):
     return None if v is None else round(v / 100, 4)  # Notion percent 포맷은 비율값
 
 
+FIXED_GROUP = {"market": "시장전략", "economy": "매크로·경제", "debenture": "채권·금리"}
+
+
 def group_of(r: dict) -> str:
+    """섹터 대분류. 시황/경제/채권은 카테고리로 고정 (AI가 '지주·기타'로 잘못 보내는 경우 방지),
+    투자전략은 ESG·정책만 AI 판단을 존중하고 나머지는 시장전략."""
     ai = r.get("ai") or {}
-    if ai.get("sector_group"):
-        return ai["sector_group"]
-    return {"invest": "시장전략", "market": "시장전략", "economy": "매크로·경제",
-            "debenture": "채권·금리"}.get(r["category"], r.get("sector") or "미분류")
+    cat, g = r["category"], ai.get("sector_group")
+    if cat in FIXED_GROUP:
+        return FIXED_GROUP[cat]
+    if cat == "invest":
+        return g if g == "ESG·정책" else "시장전략"
+    return g or r.get("sector") or "미분류"
 
 
 def subject(r: dict) -> str:
