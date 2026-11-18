@@ -1,0 +1,61 @@
+name: Daily analyst report digest
+
+on:
+  schedule:
+    # 평일 06:17 KST (= UTC 전날 21:17, 일~목). 정각은 GitHub 혼잡으로 지연이 잦아 17분.
+    # 직전 영업일 리포트 전체를 수집 → 출근길(07시 전후)에 Notion 브리핑 완성
+    - cron: "17 21 * * 0-4"
+  workflow_dispatch:          # Actions 탭에서 수동 실행 가능
+    inputs:
+      date:
+        description: "대상 날짜 (YYYY-MM-DD, 비우면 직전 영업일)"
+        required: false
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300       # 배치 대기 포함 (보통 10분 내외)
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 종목→업종 캐시를 실행 간 재사용
+      - uses: actions/cache@v4
+        with:
+          path: cache
+          key: sectors-${{ github.run_id }}
+          restore-keys: sectors-
+
+      - name: 대상 날짜 결정
+        run: echo "DATE=$(python target_date.py '${{ github.event.inputs.date }}')" >> "$GITHUB_ENV"
+
+      - name: 1. 수집
+        run: python collect.py --date "$DATE"
+
+      - name: 2. AI 요약 (배치)
+        run: python summarize.py --date "$DATE" --delete-pdfs --max-wait 16200
+
+      - name: 3. Notion 게시
+        if: always()           # 요약 일부 실패해도 수집분은 게시
+        run: python publish_notion.py --date "$DATE"
+
+      - name: 결과 보관 (30일)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: summaries-${{ env.DATE }}
+          path: data/summaries/
+          retention-days: 30

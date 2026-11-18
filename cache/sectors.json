@@ -1,0 +1,182 @@
+{
+  "096530": {
+    "name": "씨젠",
+    "sector": "생명과학도구및서비스",
+    "sector_code": "262",
+    "market": "KOSDAQ"
+  },
+  "005850": {
+    "name": "에스엘",
+    "sector": "자동차부품",
+    "sector_code": "270",
+    "market": "KOSPI"
+  },
+  "108490": {
+    "name": "로보티즈",
+    "sector": "기계",
+    "sector_code": "299",
+    "market": "KOSDAQ"
+  },
+  "003690": {
+    "name": "코리안리",
+    "sector": "손해보험",
+    "sector_code": "315",
+    "market": "KOSPI"
+  },
+  "017960": {
+    "name": "한국카본",
+    "sector": "조선",
+    "sector_code": "291",
+    "market": "KOSPI"
+  },
+  "033500": {
+    "name": "동성화인텍",
+    "sector": "화학",
+    "sector_code": "272",
+    "market": "KOSDAQ"
+  },
+  "282330": {
+    "name": "BGF리테일",
+    "sector": "백화점과일반상점",
+    "sector_code": "264",
+    "market": "KOSPI"
+  },
+  "068270": {
+    "name": "셀트리온",
+    "sector": "제약",
+    "sector_code": "261",
+    "market": "KOSPI"
+  },
+  "005880": {
+    "name": "대한해운",
+    "sector": "해운사",
+    "sector_code": "323",
+    "market": "KOSPI"
+  },
+  "010780": {
+    "name": "아이에스동서",
+    "sector": "건설",
+    "sector_code": "279",
+    "market": "KOSPI"
+  },
+  "032500": {
+    "name": "케이엠더블유",
+    "sector": "통신장비",
+    "sector_code": "294",
+    "market": "KOSDAQ"
+  },
+  "129920": {
+    "name": "대성하이텍",
+    "sector": "기계",
+    "sector_code": "299",
+    "market": "KOSDAQ"
+  },
+  "039840": {
+    "name": "디오",
+    "sector": "건강관리장비와용품",
+    "sector_code": "281",
+    "market": "KOSDAQ"
+  },
+  "389650": {
+    "name": "넥스트바이오메디컬",
+    "sector": "건강관리장비와용품",
+    "sector_code": "281",
+    "market": "KOSDAQ"
+  },
+  "419530": {
+    "name": "SAMG엔터",
+    "sector": "방송과엔터테인먼트",
+    "sector_code": "285",
+    "market": "KOSDAQ"
+  },
+  "042510": {
+    "name": "라온시큐어",
+    "sector": "소프트웨어",
+    "sector_code": "287",
+    "market": "KOSDAQ"
+  },
+  "290740": {
+    "name": "액트로",
+    "sector": "핸드셋",
+    "sector_code": "292",
+    "market": "KOSDAQ"
+  },
+  "476060": {
+    "name": "온코닉테라퓨틱스",
+    "sector": "제약",
+    "sector_code": "261",
+    "market": "KOSDAQ"
+  },
+  "099320": {
+    "name": "쎄트렉아이",
+    "sector": "우주항공과국방",
+    "sector_code": "284",
+    "market": "KOSDAQ"
+  },
+  "332570": {
+    "name": "PS일렉트로닉스",
+    "sector": "핸드셋",
+    "sector_code": "292",
+    "market": "KOSDAQ"
+  },
+  "080580": {
+    "name": "오킨스전자",
+    "sector": "반도체와반도체장비",
+    "sector_code": "278",
+    "market": "KOSDAQ"
+  },
+  "102710": {
+    "name": "이엔에프테크놀로지",
+    "sector": "반도체와반도체장비",
+    "sector_code": "278",
+    "market": "KOSDAQ"
+  },
+  "365340": {
+    "name": "성일하이텍",
+    "sector": "전기제품",
+    "sector_code": "283",
+    "market": "KOSDAQ"
+  },
+  "340570": {
+    "name": "티앤엘",
+    "sector": "건강관리장비와용품",
+    "sector_code": "281",
+    "market": "KOSDAQ"
+  },
+  "119610": {
+    "name": "인터로조",
+    "sector": "건강관리장비와용품",
+    "sector_code": "281",
+    "market": "KOSDAQ"
+  },
+  "006260": {
+    "name": "LS",
+    "sector": "전기장비",
+    "sector_code": "306",
+    "market": "KOSPI"
+  },
+  "216080": {
+    "name": "제테마",
+    "sector": "건강관리장비와용품",
+    "sector_code": "281",
+    "market": "KOSDAQ"
+  },
+  "035000": {
+    "name": "HS애드",
+    "sector": "광고",
+    "sector_code": "310",
+    "market": "KOSPI"
+  },
+  "295310": {
+    "name": "에이치브이엠",
+    "sector": "비철금속",
+    "sector_code": "322",
+    "market": "KOSDAQ"
+  },
+  "439260": {
+    "name": "대한조선",
+    "sector": "조선",
+    "sector_code": "291",
+    "market": "KOSPI"
+  }
+}

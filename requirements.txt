@@ -1,0 +1,4 @@
+requests>=2.31
+PyYAML>=6.0
+anthropic>=2.10
+pypdf>=5.0

@@ -1,0 +1,39 @@
+# 수집 설정 ─ 기본값: 6개 카테고리 전체, 필터 없이 모든 리포트 수집
+#
+# (선택) 특정 카테고리만 좁히고 싶을 때 쓰는 필터:
+#   - brokers  : 지정하면 해당 증권사만 (AND 조건)
+#   - items / industries / keywords : 하나라도 맞으면 통과 (OR 조건)
+#   - 모두 비어 있으면 → 전부 수집
+
+collect:
+  request_delay_sec: 1.0     # 요청 간 간격 (서버 부담 최소화)
+  download_pdf: true
+
+summarize:
+  # batch: 배치 API (50% 할인, 보통 수 분~1시간 내 완료) / sync: 즉시 호출 (정가)
+  mode: batch
+  daily_budget_usd: 1.0      # 실행 후 실제 비용이 이를 넘으면 경고
+  max_workers: 4             # sync 모드 동시 요청 수
+
+  # 카테고리별 모델·입력 방식 (실측 기반 예상 ≈ $0.8/일, 82건 기준. 종목 PDF 1p ≈ 3,200토큰)
+  #   source: pdf  → PDF 앞 max_pages 페이지를 직접 읽음 (표·차트 포함)
+  #   source: text → 네이버 제공 요약문만 사용 (매우 저렴)
+  #   effort: low | medium | high  (높을수록 꼼꼼하지만 비쌈)
+  routes:
+    company:   {model: claude-sonnet-5-5, source: pdf,  max_pages: 6,  effort: low}
+    industry:  {model: claude-haiku-5-5,  source: pdf,  max_pages: 20, effort: low}
+    invest:    {model: claude-haiku-5-5,  source: pdf,  max_pages: 20, effort: low}
+    economy:   {model: claude-haiku-5-5,  source: pdf,  max_pages: 20, effort: low}
+    market:    {model: claude-haiku-5-5,  source: text, effort: low}
+    debenture: {model: claude-haiku-5-5,  source: text, effort: low}
+
+  # 하루치 요약을 종합하는 데일리 브리핑 (텍스트 1회 호출, 약 $0.01~0.03)
+  digest: {model: claude-sonnet-5-5, effort: medium}
+
+categories:
+  company:   {enabled: true}   # 종목분석
+  industry:  {enabled: true}   # 산업분석
+  invest:    {enabled: true}   # 투자전략
+  economy:   {enabled: true}   # 경제분석
+  market:    {enabled: true}   # 시황정보
+  debenture: {enabled: true}   # 채권분석
