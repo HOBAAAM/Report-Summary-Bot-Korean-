@@ -9,6 +9,7 @@
     python publish_notion.py                  # 오늘(KST)
     python publish_notion.py --date 2026-11-18
     python publish_notion.py --dry-run        # Notion에 쓰지 않고 payload만 생성
+    python publish_notion.py --exists         # 그날 브리핑이 이미 있으면 'true', 없으면 'false' 출력
 
 입력: data/summaries/DATE.json (없으면 data/reports/DATE.json으로 메타데이터만 게시)
       data/summaries/DATE.digest.json (있으면 브리핑 상단에 AI 종합 분석)
@@ -369,11 +370,23 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
     return 1 if failed else 0
 
 
+def cmd_exists(nc, date: str) -> int:
+    """그날 데일리 브리핑이 이미 게시됐는지 stdout에 true/false로 출력 (예비 실행 스킵 판단용)."""
+    ids = load_json(IDS_FILE, None)
+    if not ids:
+        log.error("notion_ids.json 없음 ─ 먼저 --setup <페이지 링크> 실행")
+        return 1
+    found = nc.query_all(ids["briefings_db_id"], {"property": "날짜", "date": {"equals": date}})
+    print("true" if found else "false")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Notion 게시")
     p.add_argument("--date", default=datetime.now(KST).strftime("%Y-%m-%d"))
     p.add_argument("--setup", metavar="PAGE_URL", help="최초 1회: 부모 페이지 아래 DB 생성")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--exists", action="store_true", help="그날 브리핑 존재 여부만 출력 (true/false)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-5s %(message)s",
                         datefmt="%H:%M:%S")
@@ -386,6 +399,8 @@ def main() -> int:
     if args.setup:
         cmd_setup(nc, args.setup)
         return 0
+    if args.exists:
+        return cmd_exists(nc, args.date)
     return cmd_publish(nc, args.date, args.dry_run)
 
 

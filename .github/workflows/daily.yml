@@ -2,10 +2,13 @@ name: Daily analyst report digest
 
 on:
   schedule:
-    # 평일 08:50 KST (= UTC 전날 23:50, 일~목)
-    # 그날 아침까지 업로드된 리포트를 수집 → 장 시작 전후 Notion 브리핑 완성
-    # (GitHub 예약 실행은 혼잡 시 수~수십 분 늦게 시작될 수 있음)
-    - cron: "50 23 * * 0-4"
+    # 본 실행: 평일 08:30 KST (= UTC 전날 23:30, 일~목)
+    # 그날 아침까지 업로드된 리포트를 수집 → 장 시작 전 Notion 브리핑 완성
+    - cron: "30 23 * * 0-4"
+    # 예비 실행: 평일 09:30 KST (= UTC 00:30, 월~금)
+    # GitHub 예약 실행은 혼잡 시 지연·누락될 수 있음 → 본 실행이 빠졌을 때만 돌고,
+    # 이미 그날 브리핑이 게시돼 있으면 수집·요약 없이 바로 종료 (API 비용 중복 없음)
+    - cron: "30 0 * * 1-5"
   workflow_dispatch:          # Actions 탭에서 수동 실행 가능
     inputs:
       date:
@@ -43,18 +46,28 @@ jobs:
       - name: 대상 날짜 결정
         run: echo "DATE=$(python target_date.py '${{ github.event.inputs.date }}')" >> "$GITHUB_ENV"
 
+      - name: 예비 실행이면 기존 게시 여부 확인
+        id: check
+        if: github.event_name == 'schedule' && github.event.schedule == '30 0 * * 1-5'
+        run: |
+          EXISTS=$(python publish_notion.py --exists --date "$DATE")
+          echo "skip=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [ "$EXISTS" = "true" ]; then echo "$DATE 브리핑이 이미 있음 ─ 예비 실행 건너뜀"; fi
+
       - name: 1. 수집
+        if: steps.check.outputs.skip != 'true'
         run: python collect.py --date "$DATE"
 
       - name: 2. AI 요약 (배치)
+        if: steps.check.outputs.skip != 'true'
         run: python summarize.py --date "$DATE" --delete-pdfs --max-wait 16200
 
       - name: 3. Notion 게시
-        if: always()           # 요약 일부 실패해도 수집분은 게시
+        if: always() && steps.check.outputs.skip != 'true'   # 요약 일부 실패해도 수집분은 게시
         run: python publish_notion.py --date "$DATE"
 
       - name: 결과 보관 (30일)
-        if: always()
+        if: always() && steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: summaries-${{ env.DATE }}
