@@ -253,6 +253,8 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
     # 섹터별
     sectors, macro = grouped(reports)
     for heading, groups in [("🏭 섹터별", sectors), ("🌐 시장 · 매크로 · 채권", macro)]:
+        if not groups:
+            continue  # 해당 리포트가 없는 날은 빈 제목을 만들지 않음
         out.append(B.h2(heading))
         for g, rows in groups:
             out.append(B.toggle(f"{g} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
