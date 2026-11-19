@@ -3,8 +3,8 @@
 Notion 구조:
     부모 페이지
     └─ 🗓️ 데일리 리포트 (DB, 날짜별 1행)
-       └─ 11/18 (수) · <한 줄 헤드라인>
-          ├─ 브리핑 (건수 · 테마 · 하이라이트 · 섹터별 · My View)
+       └─ 11/18 (수) 데일리 리포트   (목록 화면에는 '요약' 열에 초간단 요약 표시)
+          ├─ 브리핑 (헤드라인 · 건수 · 테마 · 하이라이트 · 섹터별 · My View)
           ├─ 📑 리포트별 분석 ─ 섹터 그룹별 하위 페이지 (리포트 1건 = 1페이지)
           └─ 🕔 오후 추가 리포트 ─ --append 실행 시 새로 올라온 리포트만 덧붙임
 
@@ -57,6 +57,7 @@ BRIEFING_DB_PROPS = {
     "목표가 상향": {"number": {}},
     "목표가 하향": {"number": {}},
     "헤드라인": {"rich_text": {}},
+    "요약": {"rich_text": {}},
 }
 
 
@@ -101,10 +102,8 @@ def weekday(date: str) -> str:
     return WEEKDAY[datetime.strptime(date, "%Y-%m-%d").weekday()]
 
 
-def day_title(date: str, headline: str = None) -> str:
-    """DB 목록에 보이는 제목. 헤드라인이 있으면 그것을 크게, 없으면 기본 문구."""
-    head = f"{int(date[5:7])}/{int(date[8:10])} ({weekday(date)})"
-    return f"{head} · {headline}" if headline else f"{head} 데일리 리포트"
+def day_title(date: str) -> str:
+    return f"{int(date[5:7])}/{int(date[8:10])} ({weekday(date)}) 데일리 리포트"
 
 
 def report_title(r: dict) -> str:
@@ -219,7 +218,9 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
     for r in reports:
         counts[r["category"]] += 1
     stats = " · ".join(f"{CATEGORY_KO[c]} {n}" for c, n in counts.items())
-    out.append(B.para(B.rt(f"오늘 수집한 리포트 {len(reports)}건  ({stats})", color="gray")))
+    if digest:
+        out.append(B.callout(B.rt(digest["headline"], bold=True), "📌", "yellow_background"))
+    out.append(B.para(B.rt(f"총 {len(reports)}건  ({stats})", color="gray")))
 
     if digest:
         out.append(B.h2("🔥 오늘의 테마"))
@@ -372,12 +373,13 @@ def cmd_publish(nc, date: str, dry_run: bool, append: bool = False) -> int:
         return 1
     comp = [r for r in reports if r["category"] == "company"]
     props = {
-        "제목": B.p_title(day_title(date, (digest or {}).get("headline"))),
+        "제목": B.p_title(day_title(date)),
         "날짜": B.p_date(date),
         "리포트 수": B.p_number(len(reports)),
         "목표가 상향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) > 0)),
         "목표가 하향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) < 0)),
         "헤드라인": B.p_text((digest or {}).get("headline")),
+        "요약": B.p_text((digest or {}).get("brief")),
     }
     if append:
         days = nc.query_all(ids["briefings_db_id"], {"property": "날짜", "date": {"equals": date}})
