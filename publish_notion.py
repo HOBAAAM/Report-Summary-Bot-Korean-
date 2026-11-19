@@ -3,9 +3,10 @@
 Notion 구조:
     부모 페이지
     └─ 🗓️ 데일리 리포트 (DB, 날짜별 1행)
-       └─ 11/18 (수) 데일리 리포트
-          ├─ 브리핑 (테마 · 하이라이트 · 섹터별 · My View)
-          └─ 📑 리포트별 분석 ─ 섹터 그룹별 하위 페이지 (리포트 1건 = 1페이지)
+       └─ 11/18 (수) · <한 줄 헤드라인>
+          ├─ 브리핑 (건수 · 테마 · 하이라이트 · 섹터별 · My View)
+          ├─ 📑 리포트별 분석 ─ 섹터 그룹별 하위 페이지 (리포트 1건 = 1페이지)
+          └─ 🕔 오후 추가 리포트 ─ --append 실행 시 새로 올라온 리포트만 덧붙임
 
 최초 1회:
     python publish_notion.py --setup https://app.notion.com/p/<page-id>
@@ -15,6 +16,7 @@ Notion 구조:
     python publish_notion.py                  # 오늘(KST)
     python publish_notion.py --date 2026-11-18
     python publish_notion.py --dry-run        # Notion에 쓰지 않고 payload만 생성
+    python publish_notion.py --append         # 오후 보충: 그날 페이지에 새 리포트만 추가 (없으면 새로 게시)
     python publish_notion.py --exists         # 그날 브리핑이 이미 있으면 'true', 없으면 'false' 출력
 
 입력: data/summaries/DATE.json (없으면 data/reports/DATE.json으로 메타데이터만 게시)
@@ -99,8 +101,10 @@ def weekday(date: str) -> str:
     return WEEKDAY[datetime.strptime(date, "%Y-%m-%d").weekday()]
 
 
-def day_title(date: str) -> str:
-    return f"{int(date[5:7])}/{int(date[8:10])} ({weekday(date)}) 데일리 리포트"
+def day_title(date: str, headline: str = None) -> str:
+    """DB 목록에 보이는 제목. 헤드라인이 있으면 그것을 크게, 없으면 기본 문구."""
+    head = f"{int(date[5:7])}/{int(date[8:10])} ({weekday(date)})"
+    return f"{head} · {headline}" if headline else f"{head} 데일리 리포트"
 
 
 def report_title(r: dict) -> str:
@@ -215,9 +219,7 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
     for r in reports:
         counts[r["category"]] += 1
     stats = " · ".join(f"{CATEGORY_KO[c]} {n}" for c, n in counts.items())
-    if digest:
-        out.append(B.callout(B.rt(digest["headline"], bold=True), "📌", "yellow_background"))
-    out.append(B.para(B.rt(f"총 {len(reports)}건  ({stats})", color="gray")))
+    out.append(B.para(B.rt(f"오늘 수집한 리포트 {len(reports)}건  ({stats})", color="gray")))
 
     if digest:
         out.append(B.h2("🔥 오늘의 테마"))
@@ -271,6 +273,42 @@ def cmd_setup(nc: NotionClient, page: str) -> None:
     log.info("생성 완료 → %s\n  데일리 리포트 DB: %s", IDS_FILE.name, bdb["url"])
 
 
+def plain_title(props: dict) -> str:
+    return "".join(t["text"]["content"] for t in props["제목"]["title"])
+
+
+def report_items(rows: list) -> list:
+    return [(rkey(r), report_title(r), CATEGORY_ICON.get(r["category"]), report_blocks(r)) for r in rows]
+
+
+def append_day(nc: NotionClient, day_id: str, reports: list, props: dict) -> int:
+    """오후 보충: 그날 페이지에 아직 없는 리포트만 '🕔 오후 추가 리포트' 아래 하위 페이지로 덧붙임.
+
+    이미 게시된 리포트는 하위 페이지 제목으로 판별 (제목은 데이터에서 결정적으로 만들어짐).
+    브리핑·My View 등 기존 본문은 건드리지 않음. 반환: 실패한 리포트 수.
+    """
+    have = {b["child_page"]["title"] for b in nc.list_children(day_id) if b["type"] == "child_page"}
+    new = [r for r in reports if report_title(r)[:2000] not in have]
+    if not new:
+        log.info("추가할 새 리포트 없음 (이미 %d건 게시)", len(have))
+        return 0
+    sectors, macro = grouped(new)
+    now = datetime.now(KST).strftime("%H:%M")
+    nc.append_children(day_id, [B.divider(), B.h2(f"🕔 오후 추가 리포트 ({len(new)}건 · {now} 기준)")])
+    failed = 0
+    for g, rows in sectors + macro:
+        nc.append_children(day_id, [B.h3(f"{g} ({len(rows)})")])
+        for key, title, icon, blocks in report_items(rows):
+            try:
+                nc.create_child_page(day_id, B.rt(title[:2000]), blocks, icon=icon)
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                log.warning("✗ %s %s: %s", key, title, e)
+    nc.request("PATCH", f"/pages/{day_id}", {"properties": {k: props[k] for k in ("리포트 수", "목표가 상향", "목표가 하향")}})
+    log.info("오후 추가: %d건 (실패 %d)", len(new) - failed, failed)
+    return failed
+
+
 def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, sections: list, make_briefing) -> int:
     """날짜 페이지 1개 생성: 브리핑 → My View → 📑 리포트별 분석(섹터 그룹 제목 + 하위 페이지).
 
@@ -300,11 +338,11 @@ def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, sections: li
 
     nc.append_children(day["id"], make_briefing(urls), after=anchor)
     nc.request("DELETE", f"/blocks/{anchor}")  # 자리표시 문구 제거
-    log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", day_title(date), n - failed, failed, day["url"])
+    log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", plain_title(props), n - failed, failed, day["url"])
     return failed
 
 
-def cmd_publish(nc, date: str, dry_run: bool) -> int:
+def cmd_publish(nc, date: str, dry_run: bool, append: bool = False) -> int:
     summaries = load_json(DATA / "summaries" / f"{date}.json", [])
     raw = load_json(DATA / "reports" / f"{date}.json", [])
     if not raw:
@@ -318,8 +356,7 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
              date, len(reports), sum(1 for r in reports if r.get("ai")), "있음" if digest else "없음")
 
     sectors, macro = grouped(reports)
-    sections = [(g, [(rkey(r), report_title(r), CATEGORY_ICON.get(r["category"]), report_blocks(r))
-                     for r in rows]) for g, rows in sectors + macro]
+    sections = [(g, report_items(rows)) for g, rows in sectors + macro]
 
     if dry_run:
         out = DATA / "notion_preview" / date
@@ -335,13 +372,18 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
         return 1
     comp = [r for r in reports if r["category"] == "company"]
     props = {
-        "제목": B.p_title(day_title(date)),
+        "제목": B.p_title(day_title(date, (digest or {}).get("headline"))),
         "날짜": B.p_date(date),
         "리포트 수": B.p_number(len(reports)),
         "목표가 상향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) > 0)),
         "목표가 하향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) < 0)),
         "헤드라인": B.p_text((digest or {}).get("headline")),
     }
+    if append:
+        days = nc.query_all(ids["briefings_db_id"], {"property": "날짜", "date": {"equals": date}})
+        if days:
+            return 1 if append_day(nc, days[0]["id"], reports, props) else 0
+        log.info("%s 페이지가 아직 없음 ─ 새로 게시", date)
     failed = publish_day(nc, ids["briefings_db_id"], date, props, sections,
                          lambda urls: briefing_blocks(date, reports, digest, urls))
     return 1 if failed else 0
@@ -363,6 +405,7 @@ def main() -> int:
     p.add_argument("--date", default=datetime.now(KST).strftime("%Y-%m-%d"))
     p.add_argument("--setup", metavar="PAGE_URL", help="최초 1회: 부모 페이지 아래 DB 생성")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--append", action="store_true", help="오후 보충: 그날 페이지에 새 리포트만 추가")
     p.add_argument("--exists", action="store_true", help="그날 브리핑 존재 여부만 출력 (true/false)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-5s %(message)s",
@@ -378,7 +421,7 @@ def main() -> int:
         return 0
     if args.exists:
         return cmd_exists(nc, args.date)
-    return cmd_publish(nc, args.date, args.dry_run)
+    return cmd_publish(nc, args.date, args.dry_run, args.append)
 
 
 if __name__ == "__main__":

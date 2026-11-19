@@ -227,11 +227,12 @@ def main() -> int:
     if args.estimate:
         return 0
 
-    if state:
+    if state and any(not b.get("collected") for b in state["batches"]):
         log.info("이전에 제출한 배치 결과를 이어서 받습니다.")
         if not run.collect_batches(state, args.max_wait, args.delete_pdfs):
             return 2
-    elif todo:
+        todo = [r for r in todo if rkey(r) not in run.done]  # 이어받은 건 제외, 남은 건(오후 신규 등)은 아래에서 제출
+    if todo:
         if cfg.get("mode") == "batch":
             state = run.submit_batches(todo)
             if state["batches"] and not run.collect_batches(state, args.max_wait, args.delete_pdfs):
@@ -246,8 +247,8 @@ def main() -> int:
         log.warning("⚠️ %s 누적 비용 $%.2f 가 일 예산 $%.2f 를 넘었습니다. config.yaml routes 조정 필요",
                     args.date, day_cost, budget)
 
-    # 브리핑: 새 요약이 생겼거나 아직 없으면 생성 (일부 실패분은 다음 실행에서 재시도)
-    if not args.limit and run.done and (run.ok or not run.digest_file.exists()):
+    # 브리핑: 그날 처음 한 번만 생성 (오후 보충 실행은 아침 브리핑을 유지)
+    if not args.limit and run.done and not run.digest_file.exists():
         run.write_digest()
     return 1 if run.fail and not run.ok else 0
 

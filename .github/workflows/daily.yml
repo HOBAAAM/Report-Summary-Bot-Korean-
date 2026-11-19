@@ -9,11 +9,18 @@ on:
     # GitHub 예약 실행은 혼잡 시 지연·누락될 수 있음 → 본 실행이 빠졌을 때만 돌고,
     # 이미 그날 브리핑이 게시돼 있으면 수집·요약 없이 바로 종료 (API 비용 중복 없음)
     - cron: "30 0 * * 1-5"
+    # 오후 보충: 평일 17:07 KST (= UTC 08:07, 월~금; 정각 혼잡 회피)
+    # 낮 동안 새로 올라온 리포트만 요약해 그날 페이지에 덧붙임 (아침 브리핑·메모는 유지)
+    - cron: "7 8 * * 1-5"
   workflow_dispatch:          # Actions 탭에서 수동 실행 가능
     inputs:
       date:
         description: "대상 날짜 (YYYY-MM-DD, 비우면 오늘)"
         required: false
+      append:
+        description: "그날 페이지에 새 리포트만 추가 (끄면 그날 페이지를 새로 만듦)"
+        type: boolean
+        default: false
 
 concurrency:
   group: daily-digest
@@ -43,8 +50,24 @@ jobs:
           key: sectors-${{ github.run_id }}
           restore-keys: sectors-
 
-      - name: 대상 날짜 결정
-        run: echo "DATE=$(python target_date.py '${{ github.event.inputs.date }}')" >> "$GITHUB_ENV"
+      - name: 대상 날짜 · 실행 방식 결정
+        run: |
+          echo "DATE=$(python target_date.py '${{ github.event.inputs.date }}')" >> "$GITHUB_ENV"
+          if [ "${{ github.event.schedule }}" = "7 8 * * 1-5" ] || [ "${{ github.event.inputs.append }}" = "true" ]; then
+            echo "PUBLISH_MODE=--append" >> "$GITHUB_ENV"
+          fi
+
+      # 같은 날 앞선 실행의 수집·요약 결과 복원 → 오후 보충 때 이미 요약한 건 다시 요약하지 않음
+      - name: 그날 데이터 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/reports
+            data/summaries
+            data/pdfs
+            data/state.json
+          key: data-${{ env.DATE }}-${{ github.run_id }}
+          restore-keys: data-${{ env.DATE }}-
 
       - name: 예비 실행이면 기존 게시 여부 확인
         id: check
@@ -64,7 +87,18 @@ jobs:
 
       - name: 3. Notion 게시
         if: always() && steps.check.outputs.skip != 'true'   # 요약 일부 실패해도 수집분은 게시
-        run: python publish_notion.py --date "$DATE"
+        run: python publish_notion.py --date "$DATE" $PUBLISH_MODE
+
+      - name: 그날 데이터 저장 (다음 실행용)
+        if: always() && steps.check.outputs.skip != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/reports
+            data/summaries
+            data/pdfs
+            data/state.json
+          key: data-${{ env.DATE }}-${{ github.run_id }}
 
       - name: 결과 보관 (30일)
         if: always() && steps.check.outputs.skip != 'true'

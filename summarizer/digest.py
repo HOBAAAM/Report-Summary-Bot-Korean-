@@ -19,7 +19,8 @@ DIGEST_SYSTEM = """\
 """
 
 DIGEST_SCHEMA = _obj({
-    "headline": {"type": "string", "description": "오늘 리서치 전체를 한 문장으로"},
+    "headline": {"type": "string",
+                     "description": "오늘 리서치 전체를 관통하는 한 문장. 노션 페이지 제목으로 쓰이므로 40자 안팎으로 짧고 강하게"},
     "themes": {
         "type": "array",
         "description": "여러 리포트에 걸친 핵심 테마 3~5개",
