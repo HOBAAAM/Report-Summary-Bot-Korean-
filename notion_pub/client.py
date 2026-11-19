@@ -77,21 +77,45 @@ class NotionClient:
             cursor = data["next_cursor"]
 
     def create_page(self, database_id: str, properties: dict, children: list, icon: str = None) -> dict:
-        body = {
-            "parent": {"database_id": database_id},
-            "properties": properties,
-            "children": children[:MAX_CHILDREN],
-        }
+        return self._create({"database_id": database_id}, properties, children, icon)
+
+    def create_child_page(self, parent_page_id: str, title: list, children: list, icon: str = None) -> dict:
+        """일반 페이지 아래 하위 페이지 생성 (부모 페이지 본문 끝에 링크로 붙음)."""
+        return self._create({"page_id": parent_page_id}, {"title": title}, children, icon)
+
+    def _create(self, parent: dict, properties: dict, children: list, icon: str = None) -> dict:
+        body = {"parent": parent, "properties": properties, "children": children[:MAX_CHILDREN]}
         if icon:
             body["icon"] = {"type": "emoji", "emoji": icon}
         page = self.request("POST", "/pages", body)
         self.append_children(page["id"], children[MAX_CHILDREN:])
         return page
 
-    def append_children(self, block_id: str, children: list) -> None:
+    def list_children(self, block_id: str) -> list:
+        results, cursor = [], None
+        while True:
+            q = f"?page_size=100" + (f"&start_cursor={cursor}" if cursor else "")
+            data = self.request("GET", f"/blocks/{block_id}/children{q}")
+            results += data["results"]
+            if not data.get("has_more"):
+                return results
+            cursor = data["next_cursor"]
+
+    def append_children(self, block_id: str, children: list, after: str = None) -> list:
+        """블록 추가. after를 주면 그 블록 바로 뒤에 순서대로 삽입. 추가된 최상위 블록 목록 반환."""
+        added = []
         for i in range(0, len(children), MAX_CHILDREN):
-            self.request("PATCH", f"/blocks/{block_id}/children",
-                         {"children": children[i:i + MAX_CHILDREN]})
+            body = {"children": children[i:i + MAX_CHILDREN]}
+            if after:
+                body["after"] = after
+            res = self.request("PATCH", f"/blocks/{block_id}/children", body)["results"]
+            added += res
+            if after and res:
+                after = res[-1]["id"]
+        return added
+
+    def update_database(self, database_id: str, body: dict) -> dict:
+        return self.request("PATCH", f"/databases/{database_id}", body)
 
     def archive_page(self, page_id: str) -> None:
         self.request("PATCH", f"/pages/{page_id}", {"archived": True})

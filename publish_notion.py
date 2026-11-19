@@ -1,9 +1,15 @@
 """3단계: 요약 결과를 Notion에 게시.
 
+Notion 구조:
+    부모 페이지
+    └─ 🗓️ 데일리 리포트 (DB, 날짜별 1행)
+       └─ 11/18 (수) 데일리 리포트
+          ├─ 브리핑 (테마 · 하이라이트 · 섹터별 · My View)
+          └─ 📑 리포트별 분석 ─ 섹터 그룹별 하위 페이지 (리포트 1건 = 1페이지)
+
 최초 1회:
     python publish_notion.py --setup https://app.notion.com/p/<page-id>
-    → 해당 페이지 아래에 '📚 애널리스트 리포트' DB와 '🗓️ 데일리 브리핑' DB를 만들고
-      ID를 notion_ids.json에 저장
+    → 해당 페이지 아래에 '데일리 리포트' DB를 만들고 ID를 notion_ids.json에 저장
 
 매일:
     python publish_notion.py                  # 오늘(KST)
@@ -13,7 +19,7 @@
 
 입력: data/summaries/DATE.json (없으면 data/reports/DATE.json으로 메타데이터만 게시)
       data/summaries/DATE.digest.json (있으면 브리핑 상단에 AI 종합 분석)
-같은 날 재실행해도 중복 생성하지 않음 (nid 기준). AI 요약 없이 먼저 올라간 건은 요약이 생기면 교체.
+같은 날 재실행하면 그날 페이지(하위 리포트 포함)를 휴지통으로 보내고 새로 만듦 (중복 없음).
 """
 from __future__ import annotations
 
@@ -37,36 +43,11 @@ log = logging.getLogger("publish")
 IDS_FILE = ROOT / "notion_ids.json"
 KO_TO_CAT = {v: k for k, v in CATEGORY_KO.items()}
 MACRO_GROUPS = ["시장전략", "매크로·경제", "채권·금리"]
+WEEKDAY = "월화수목금토일"
+DB_TITLE = "데일리 리포트"
 CATEGORY_ICON = {"company": "🏢", "industry": "🏭", "invest": "🧭",
                  "economy": "🌐", "market": "📈", "debenture": "💵"}
 
-REPORT_DB_PROPS = {
-    "제목": {"title": {}},
-    "날짜": {"date": {}},
-    "구분": {"select": {}},
-    "섹터 대분류": {"select": {}},
-    "업종": {"select": {}},
-    "종목": {"rich_text": {}},
-    "종목코드": {"rich_text": {}},
-    "시장": {"select": {}},
-    "증권사": {"select": {}},
-    "애널리스트": {"rich_text": {}},
-    "투자의견": {"select": {}},
-    "목표가": {"number": {"format": "number_with_commas"}},
-    "직전 목표가": {"number": {"format": "number_with_commas"}},
-    "목표가 변동": {"number": {"format": "percent"}},
-    "작성일 주가": {"number": {"format": "number_with_commas"}},
-    "상승여력": {"number": {"format": "percent"}},
-    "논조": {"select": {}},
-    "컨센서스 대비": {"select": {}},
-    "특이사항": {"multi_select": {}},
-    "키워드": {"multi_select": {}},
-    "한줄요약": {"rich_text": {}},
-    "원문 PDF": {"url": {}},
-    "AI 요약": {"checkbox": {}},
-    "My View": {"rich_text": {}},
-    "nid": {"rich_text": {}},
-}
 BRIEFING_DB_PROPS = {
     "제목": {"title": {}},
     "날짜": {"date": {}},
@@ -114,41 +95,30 @@ def tp_text(r: dict) -> str:
 
 
 # ─────────────────────────── report page ───────────────────────────
-def report_properties(r: dict) -> dict:
-    ai = r.get("ai") or {}
-    earnings = ai.get("earnings") or {}
-    title = f"[{subject(r)}] {r['title']}" if r["category"] in ("company", "industry") else r["title"]
-    return {
-        "제목": B.p_title(title),
-        "날짜": B.p_date(r["write_date"]),
-        "구분": B.p_select(CATEGORY_KO.get(r["category"])),
-        "섹터 대분류": B.p_select(group_of(r)),
-        "업종": B.p_select(r.get("sector")),
-        "종목": B.p_text(r.get("item_name")),
-        "종목코드": B.p_text(r.get("item_code")),
-        "시장": B.p_select(r.get("market")),
-        "증권사": B.p_select(r["broker"]),
-        "애널리스트": B.p_text(r.get("analyst")),
-        "투자의견": B.p_select(r.get("opinion")),
-        "목표가": B.p_number(r.get("goal_price")),
-        "직전 목표가": B.p_number(r.get("prev_goal_price")),
-        "목표가 변동": B.p_number(pct(r.get("goal_change_pct"))),
-        "작성일 주가": B.p_number(r.get("price_at_write")),
-        "상승여력": B.p_number(pct(r.get("upside_pct"))),
-        "논조": B.p_select(ai.get("tone")),
-        "컨센서스 대비": B.p_select(earnings.get("vs_consensus")),
-        "특이사항": B.p_multi(r.get("flags")),
-        "키워드": B.p_multi(ai.get("keywords")),
-        "한줄요약": B.p_text(ai.get("one_line")),
-        "원문 PDF": B.p_url(r.get("pdf_url")),
-        "AI 요약": B.p_check(bool(ai)),
-        "nid": B.p_text(r["nid"]),
-    }
+def weekday(date: str) -> str:
+    return WEEKDAY[datetime.strptime(date, "%Y-%m-%d").weekday()]
+
+
+def day_title(date: str) -> str:
+    return f"{int(date[5:7])}/{int(date[8:10])} ({weekday(date)}) 데일리 리포트"
+
+
+def report_title(r: dict) -> str:
+    base = f"[{subject(r)}] {r['title']}" if r["category"] in ("company", "industry") else r["title"]
+    return f"{base} · {r['broker']}"
+
+
+def report_meta(r: dict) -> dict:
+    """리포트 페이지 맨 위 한 줄: 날짜 · 구분 · 섹터 · 증권사 · 애널리스트."""
+    d = r["write_date"]
+    parts = [f"{d} ({weekday(d)})", CATEGORY_KO.get(r["category"]), group_of(r),
+             r["broker"], r.get("analyst")]
+    return B.para(B.rt(" · ".join(x for x in parts if x), color="gray"))
 
 
 def report_blocks(r: dict) -> list:
     ai = r.get("ai")
-    out = []
+    out = [report_meta(r)]
     if not ai:
         out.append(B.callout("AI 요약 전 ─ 증권사 제공 요약만 표시됩니다.", "⏳"))
         out += [B.para(line) for line in (r.get("summary_text") or "").splitlines()[:50]]
@@ -211,6 +181,19 @@ def report_blocks(r: dict) -> list:
 
 
 # ─────────────────────────── daily briefing ───────────────────────────
+def grouped(reports: list) -> tuple:
+    """(섹터 그룹들, 매크로 그룹들) ─ 각 [(이름, 리포트들)]. 브리핑과 하위 페이지가 같은 순서를 씀."""
+    by_group = defaultdict(list)
+    for r in reports:
+        by_group[group_of(r)].append(r)
+    order = [g for g in SECTOR_GROUPS if g not in MACRO_GROUPS] + sorted(
+        g for g in by_group if g not in SECTOR_GROUPS)
+    sectors = [(g, sorted(by_group[g], key=lambda r: (r["category"] != "industry", subject(r))))
+               for g in order if by_group.get(g)]
+    macro = [(g, by_group[g]) for g in MACRO_GROUPS if by_group.get(g)]
+    return sectors, macro
+
+
 def report_line(r: dict, url: str) -> list:
     ai = r.get("ai") or {}
     head = f"{subject(r)} ({r['broker']})" if r["category"] == "company" else f"{r['title']} ({r['broker']})"
@@ -265,20 +248,10 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
             out.append(B.toggle(f"{title} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
 
     # 섹터별
-    by_group = defaultdict(list)
-    for r in reports:
-        by_group[group_of(r)].append(r)
-    order = [g for g in SECTOR_GROUPS if g not in MACRO_GROUPS] + sorted(
-        g for g in by_group if g not in SECTOR_GROUPS)
-    out.append(B.h2("🏭 섹터별"))
-    for g in order:
-        rows = sorted(by_group.get(g, []), key=lambda r: (r["category"] != "industry", subject(r)))
-        if rows:
-            out.append(B.toggle(f"{g} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
-    out.append(B.h2("🌐 시장 · 매크로 · 채권"))
-    for g in MACRO_GROUPS:
-        rows = by_group.get(g, [])
-        if rows:
+    sectors, macro = grouped(reports)
+    for heading, groups in [("🏭 섹터별", sectors), ("🌐 시장 · 매크로 · 채권", macro)]:
+        out.append(B.h2(heading))
+        for g, rows in groups:
             out.append(B.toggle(f"{g} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
 
     out.append(B.divider())
@@ -292,11 +265,43 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
 def cmd_setup(nc: NotionClient, page: str) -> None:
     parent = parse_page_id(page)
     nc.get_page(parent)  # 연결(Connections) 안 됐으면 여기서 404
-    rdb = nc.create_database(parent, "애널리스트 리포트", "📚", REPORT_DB_PROPS)
-    bdb = nc.create_database(parent, "데일리 브리핑", "🗓️", BRIEFING_DB_PROPS)
-    ids = {"parent_page_id": parent, "reports_db_id": rdb["id"], "briefings_db_id": bdb["id"]}
+    bdb = nc.create_database(parent, DB_TITLE, "🗓️", BRIEFING_DB_PROPS)
+    ids = {"parent_page_id": parent, "briefings_db_id": bdb["id"]}
     save_json(IDS_FILE, ids)
-    log.info("생성 완료 → %s\n  리포트 DB: %s\n  브리핑 DB: %s", IDS_FILE.name, rdb["url"], bdb["url"])
+    log.info("생성 완료 → %s\n  데일리 리포트 DB: %s", IDS_FILE.name, bdb["url"])
+
+
+def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, sections: list, make_briefing) -> int:
+    """날짜 페이지 1개 생성: 브리핑 → My View → 📑 리포트별 분석(섹터 그룹 제목 + 하위 페이지).
+
+    sections: [(그룹 이름, [(key, 제목, 아이콘, 본문 블록)])]
+    make_briefing(urls): 하위 페이지 URL(key→url)을 받아 브리핑 블록을 만드는 함수.
+    하위 페이지는 항상 부모 본문 맨 끝에 붙으므로, 자리표시 블록 하나로 페이지를 만들고 → 하위 페이지 생성
+    → 브리핑을 자리표시 바로 뒤에 끼워 넣은 뒤 자리표시 삭제 (브리핑 링크가 하위 페이지를 가리키도록).
+    반환: 실패한 리포트 수.
+    """
+    for p in nc.query_all(bdb, {"property": "날짜", "date": {"equals": date}}):
+        nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(하위 리포트 포함) 휴지통으로
+    n = sum(len(items) for _, items in sections)
+    day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {n}건 정리 중…", color="gray"))], icon="📰")
+    anchor = nc.list_children(day["id"])[0]["id"]
+
+    nc.append_children(day["id"], [B.divider(), B.h2("📑 리포트별 분석"),
+                                   B.para(B.rt("각 페이지를 열면 리포트별 AI 분석을 볼 수 있습니다.", color="gray"))])
+    urls, failed = {}, 0
+    for g, items in sections:
+        nc.append_children(day["id"], [B.h3(f"{g} ({len(items)})")])
+        for key, title, icon, blocks in items:
+            try:
+                urls[key] = nc.create_child_page(day["id"], B.rt(title[:2000]), blocks, icon=icon)["url"]
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                log.warning("✗ %s %s: %s", key, title, e)
+
+    nc.append_children(day["id"], make_briefing(urls), after=anchor)
+    nc.request("DELETE", f"/blocks/{anchor}")  # 자리표시 문구 제거
+    log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", day_title(date), n - failed, failed, day["url"])
+    return failed
 
 
 def cmd_publish(nc, date: str, dry_run: bool) -> int:
@@ -312,10 +317,14 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
     log.info("%s ─ 리포트 %d건 (AI 요약 %d건), 브리핑 AI 분석 %s",
              date, len(reports), sum(1 for r in reports if r.get("ai")), "있음" if digest else "없음")
 
+    sectors, macro = grouped(reports)
+    sections = [(g, [(rkey(r), report_title(r), CATEGORY_ICON.get(r["category"]), report_blocks(r))
+                     for r in rows]) for g, rows in sectors + macro]
+
     if dry_run:
         out = DATA / "notion_preview" / date
-        save_json(out / "reports.json", [{"properties": report_properties(r), "children": report_blocks(r)}
-                                         for r in reports])
+        save_json(out / "reports.json", [{"group": g, "title": t, "children": blk}
+                                         for g, items in sections for _, t, _, blk in items])
         save_json(out / "briefing.json", briefing_blocks(date, reports, digest, {}))
         log.info("dry-run: payload 저장 → %s", out.relative_to(ROOT))
         return 0
@@ -324,49 +333,17 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
     if not ids:
         log.error("notion_ids.json 없음 ─ 먼저 --setup <페이지 링크> 실행")
         return 1
-    rdb, bdb = ids["reports_db_id"], ids["briefings_db_id"]
-
-    # 이미 게시된 페이지 조회 (재실행 시 중복 방지)
-    existing = {}
-    for p in nc.query_all(rdb, {"property": "날짜", "date": {"equals": date}}):
-        nid = "".join(t["plain_text"] for t in p["properties"]["nid"]["rich_text"])
-        cat = KO_TO_CAT.get((p["properties"]["구분"]["select"] or {}).get("name"))
-        existing[f"{cat}-{nid}"] = (p["id"], p["url"], p["properties"]["AI 요약"]["checkbox"])
-
-    urls, created, replaced, failed = {}, 0, 0, 0
-    for r in reports:
-        prev = existing.get(rkey(r))
-        if prev and (prev[2] or not r.get("ai")):
-            urls[rkey(r)] = prev[1]
-            continue
-        try:
-            if prev:  # 요약 없이 올라갔던 페이지 → 요약본으로 교체
-                nc.archive_page(prev[0])
-                replaced += 1
-            page = nc.create_page(rdb, report_properties(r), report_blocks(r),
-                                  icon=CATEGORY_ICON.get(r["category"]))
-            urls[rkey(r)] = page["url"]
-            created += 1
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            log.warning("✗ %s %s: %s", rkey(r), r["title"], e)
-    log.info("리포트 게시: 신규 %d (교체 %d) / 기존 유지 %d / 실패 %d",
-             created - replaced, replaced, len(reports) - created - failed, failed)
-
-    # 데일리 브리핑: 같은 날짜 기존 페이지는 보관 처리 후 새로 생성
-    for p in nc.query_all(bdb, {"property": "날짜", "date": {"equals": date}}):
-        nc.archive_page(p["id"])
     comp = [r for r in reports if r["category"] == "company"]
-    wd = "월화수목금토일"[datetime.strptime(date, "%Y-%m-%d").weekday()]
-    page = nc.create_page(bdb, {
-        "제목": B.p_title(f"{date} ({wd}) 리서치 브리핑"),
+    props = {
+        "제목": B.p_title(day_title(date)),
         "날짜": B.p_date(date),
         "리포트 수": B.p_number(len(reports)),
         "목표가 상향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) > 0)),
         "목표가 하향": B.p_number(sum(1 for r in comp if (r.get("goal_change_pct") or 0) < 0)),
         "헤드라인": B.p_text((digest or {}).get("headline")),
-    }, briefing_blocks(date, reports, digest, urls), icon="📰")
-    log.info("브리핑 게시: %s", page["url"])
+    }
+    failed = publish_day(nc, ids["briefings_db_id"], date, props, sections,
+                         lambda urls: briefing_blocks(date, reports, digest, urls))
     return 1 if failed else 0
 
 
