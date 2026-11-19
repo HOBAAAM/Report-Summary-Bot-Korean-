@@ -2,13 +2,13 @@ name: Daily analyst report digest
 
 on:
   schedule:
-    # 본 실행: 평일 09:03 KST (= UTC 00:03, 월~금) ─ 하루 1회
-    # 그날 아침까지 업로드된 리포트를 수집 → Notion 브리핑 게시 (정각 혼잡을 피해 3분)
-    - cron: "3 0 * * 1-5"
-    # 예비 실행: 평일 10:03 KST (= UTC 01:03, 월~금)
+    # 본 실행: 평일 08:30 KST (= UTC 전날 23:30, 일~목) ─ 하루 1회
+    # 장 시작(09:00) 전에 그날 아침까지 올라온 리포트 브리핑을 준비
+    - cron: "30 23 * * 0-4"
+    # 예비 실행: 평일 08:50 KST (= UTC 전날 23:50, 일~목)
     # GitHub 예약 실행은 혼잡 시 지연·누락될 수 있음 → 본 실행이 빠졌을 때만 돌고,
     # 이미 그날 브리핑이 게시돼 있으면 수집·요약 없이 바로 종료 (두 번 게시·비용 중복 없음)
-    - cron: "3 1 * * 1-5"
+    - cron: "50 23 * * 0-4"
   workflow_dispatch:          # Actions 탭에서 수동 실행 가능
     inputs:
       date:
@@ -60,7 +60,7 @@ jobs:
 
       - name: 예비 실행이면 기존 게시 여부 확인
         id: check
-        if: github.event_name == 'schedule' && github.event.schedule == '3 1 * * 1-5'
+        if: github.event_name == 'schedule' && github.event.schedule == '50 23 * * 0-4'
         run: |
           EXISTS=$(python publish_notion.py --exists --date "$DATE")
           echo "skip=$EXISTS" >> "$GITHUB_OUTPUT"
