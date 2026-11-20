@@ -238,18 +238,29 @@ def table(header: list, rows: list) -> dict:
 
 
 def highlight_table(reports: list, urls: dict):
-    """규칙 기반 하이라이트 (AI 판단 아님, 숫자 기준) → 표 1개. 해당 없으면 None."""
+    """종목분석 전체를 목표가 기준으로 분류 (네이버 직전 목표가 = 마지막 공개 리포트 대비) → 표 1개.
+
+    종목은 한 그룹에만 들어감. 해당 없으면 None.
+    """
     comp = [r for r in reports if r["category"] == "company"]
-    vs = lambda r: ((r.get("ai") or {}).get("earnings") or {}).get("vs_consensus")  # noqa: E731
+
+    def tp_group(r):
+        if not r.get("goal_price"):
+            return "미제시"
+        if r.get("prev_goal_price") is None:
+            return "신규"
+        chg = r.get("goal_change_pct") or 0
+        return "상향" if chg > 0 else "하향" if chg < 0 else "유지"
+
+    by = defaultdict(list)
+    for r in comp:
+        by[tp_group(r)].append(r)
     groups = [
-        ("🔺 목표가 상향", sorted([r for r in comp if (r.get("goal_change_pct") or 0) > 0],
-                              key=lambda r: -r["goal_change_pct"])),
-        ("🔻 목표가 하향", sorted([r for r in comp if (r.get("goal_change_pct") or 0) < 0],
-                              key=lambda r: r["goal_change_pct"])),
-        ("⚪ 매수 외 의견", [r for r in comp if r.get("opinion_type")
-                          and r["opinion_type"] not in ("buy", "strongbuy")]),
-        ("📈 컨센 상회", [r for r in comp if vs(r) == "상회"]),
-        ("📉 컨센 하회", [r for r in comp if vs(r) == "하회"]),
+        ("🔺 목표가 상향", sorted(by["상향"], key=lambda r: -r["goal_change_pct"])),
+        ("🔻 목표가 하향", sorted(by["하향"], key=lambda r: r["goal_change_pct"])),
+        ("➖ 목표가 유지", by["유지"]),
+        ("🆕 목표가 신규", by["신규"]),
+        ("⬜ 목표가 미제시", by["미제시"]),
     ]
     rows = []
     for label, rs in groups:
