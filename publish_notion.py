@@ -4,8 +4,10 @@ Notion 구조:
     부모 페이지
     └─ 🗓️ 데일리 리포트 (DB, 날짜별 1행)
        └─ 11/18 (수) 데일리 리포트   (목록 화면에는 '요약' 열에 초간단 요약 표시)
-          ├─ 브리핑 (헤드라인 · 건수 · 테마 · 하이라이트 · 섹터별 · My View)
-          └─ 📑 리포트별 분석 ─ 섹터 그룹별 하위 페이지 (리포트 1건 = 1페이지)
+          ├─ 브리핑 (노란 헤드라인 · 건수 · 테마 · 🚩 하이라이트 표)
+          ├─ 🏭 섹터별 리포트 (인라인 DB, 리포트 1건 = 1행 = 분석 페이지)
+          ├─ 🌐 시장 · 매크로 · 채권 리포트 (인라인 DB)
+          └─ ✍️ My View
 
 최초 1회:
     python publish_notion.py --setup https://app.notion.com/p/<page-id>
@@ -48,6 +50,16 @@ DB_TITLE = "데일리 리포트"
 CATEGORY_ICON = {"company": "🏢", "industry": "🏭", "invest": "🧭",
                  "economy": "🌐", "market": "📈", "debenture": "💵"}
 
+# 날짜 페이지 안의 리포트 DB (섹터별 / 시장·매크로·채권 각 1개).
+# API로는 열 순서를 정할 수 없어 열 수를 최소로 유지 (구분은 아이콘, 날짜는 리포트 페이지 첫 줄에 표시)
+REPORT_DB_PROPS = {
+    "제목": {"title": {}},
+    "섹터": {"select": {}},
+    "증권사": {"select": {}},
+    "의견·목표가": {"rich_text": {}},
+    "한줄 요약": {"rich_text": {}},
+}
+MACRO_DB_PROPS = {k: v for k, v in REPORT_DB_PROPS.items() if k != "의견·목표가"}  # 목표가 없음
 BRIEFING_DB_PROPS = {
     "제목": {"title": {}},
     "날짜": {"date": {}},
@@ -198,22 +210,67 @@ def grouped(reports: list) -> tuple:
     return sectors, macro
 
 
-def report_line(r: dict, url: str) -> list:
-    ai = r.get("ai") or {}
-    head = f"{subject(r)} ({r['broker']})" if r["category"] == "company" else f"{r['title']} ({r['broker']})"
-    rich = B.rt(head, bold=True, link=url)
-    if r["category"] == "company" and r.get("goal_price"):
-        chg = r.get("goal_change_pct")
-        color = "red" if chg and chg > 0 else "blue" if chg and chg < 0 else "gray"
-        rich += B.rt(f"  {r.get('opinion') or ''} {r['goal_price']:,}"
-                     + (f" ({chg:+.1f}%)" if chg else ""), color=color)
-    line = ai.get("one_line") or (r["title"] if r["category"] == "company" else "")
-    if line:
-        rich += B.rt(f"  ─ {line}")
-    return rich
+def tp_short(r: dict) -> str:
+    """'매수 39,000 (-11.4%)' ─ 종목분석만."""
+    if r["category"] != "company" or not r.get("goal_price"):
+        return ""
+    op = r.get("opinion") if r.get("opinion") not in (None, "", "없음", "-") else ""
+    s = f"{op} {r['goal_price']:,}".strip()
+    chg = r.get("goal_change_pct")
+    return s + (f" ({chg:+.1f}%)" if chg else "")
+
+
+def tp_color(r: dict) -> str:
+    chg = r.get("goal_change_pct")
+    return "red" if chg and chg > 0 else "blue" if chg and chg < 0 else "default"
+
+
+def cell(text, **kw) -> list:
+    return B.rt(text, **kw) if text else []
+
+
+def table(header: list, rows: list) -> dict:
+    trs = [{"type": "table_row", "table_row": {"cells": [cell(h, bold=True) for h in header]}}]
+    trs += [{"type": "table_row", "table_row": {"cells": r}} for r in rows]
+    return {"object": "block", "type": "table",
+            "table": {"table_width": len(header), "has_column_header": True, "has_row_header": False,
+                      "children": trs}}
+
+
+def highlight_table(reports: list, urls: dict):
+    """규칙 기반 하이라이트 (AI 판단 아님, 숫자 기준) → 표 1개. 해당 없으면 None."""
+    comp = [r for r in reports if r["category"] == "company"]
+    vs = lambda r: ((r.get("ai") or {}).get("earnings") or {}).get("vs_consensus")  # noqa: E731
+    groups = [
+        ("🔺 목표가 상향", sorted([r for r in comp if (r.get("goal_change_pct") or 0) > 0],
+                              key=lambda r: -r["goal_change_pct"])),
+        ("🔻 목표가 하향", sorted([r for r in comp if (r.get("goal_change_pct") or 0) < 0],
+                              key=lambda r: r["goal_change_pct"])),
+        ("⚪ 매수 외 의견", [r for r in comp if r.get("opinion_type")
+                          and r["opinion_type"] not in ("buy", "strongbuy")]),
+        ("📈 컨센 상회", [r for r in comp if vs(r) == "상회"]),
+        ("📉 컨센 하회", [r for r in comp if vs(r) == "하회"]),
+    ]
+    rows = []
+    for label, rs in groups:
+        for i, r in enumerate(rs):
+            rows.append([cell(label if i == 0 else "", bold=True),
+                         cell(subject(r), bold=True, link=urls.get(rkey(r))),
+                         cell(r["broker"]),
+                         cell(tp_short(r), color=tp_color(r))])
+    # 한줄 요약은 칸 안에서 여러 줄로 접혀 읽기 어려움 → 종목을 누르면 상세 분석으로 이동
+    return table(["구분", "종목", "증권사", "의견·목표가"], rows) if rows else None
+
+
+def bullet_with(rich: list, children: list) -> dict:
+    b = B.bullet(rich)
+    if children:
+        b["bulleted_list_item"]["children"] = children
+    return b
 
 
 def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
+    """날짜 페이지 상단: 노란 헤드라인 → 건수 → 테마 등 AI 브리핑 → 🚩 하이라이트 표."""
     out = []
     counts = defaultdict(int)
     for r in reports:
@@ -224,47 +281,45 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
     out.append(B.para(B.rt(f"총 {len(reports)}건  ({stats})", color="gray")))
 
     if digest:
+        # 긴 문장이 여러 줄로 이어지지 않도록: 굵은 제목 한 줄 + 설명은 한 단계 들여서
         out.append(B.h2("🔥 오늘의 테마"))
         for t in digest.get("themes", []):
-            out.append(B.bullet(B.rt(t["title"] + " ─ ", bold=True) + B.rt(t["detail"])))
+            out.append(bullet_with(B.rt(t["title"], bold=True),
+                                   [B.bullet(B.rt(t["detail"], color="gray"))] if t.get("detail") else []))
         if digest.get("divergence"):
             out.append(B.h3("⚖️ 증권사 간 시각 차이"))
             out.extend(B.bullets(digest["divergence"]))
         if digest.get("watch_list"):
             out.append(B.h3("👀 주목 종목"))
-            out.extend(B.bullet(B.rt(w["name"] + ": ", bold=True) + B.rt(w["reason"]))
+            out.extend(B.bullet(B.rt(w["name"], bold=True) + B.rt("  " + w["reason"], color="gray"))
                        for w in digest["watch_list"])
         if digest.get("risks"):
             out.append(B.h3("⚠️ 공통 리스크"))
             out.extend(B.bullets(digest["risks"]))
 
-    # 규칙 기반 하이라이트 (AI 없이도 항상 정확한 숫자)
-    comp = [r for r in reports if r["category"] == "company"]
-    up = sorted([r for r in comp if (r.get("goal_change_pct") or 0) > 0], key=lambda r: -r["goal_change_pct"])
-    down = sorted([r for r in comp if (r.get("goal_change_pct") or 0) < 0], key=lambda r: r["goal_change_pct"])
-    non_buy = [r for r in comp if r.get("opinion_type") and r["opinion_type"] not in ("buy", "strongbuy")]
-    beat = [r for r in comp if ((r.get("ai") or {}).get("earnings") or {}).get("vs_consensus") == "상회"]
-    miss = [r for r in comp if ((r.get("ai") or {}).get("earnings") or {}).get("vs_consensus") == "하회"]
-    out.append(B.h2("🚩 하이라이트"))
-    for title, rows in [("🔺 목표가 상향", up), ("🔻 목표가 하향", down), ("⚪ 매수 외 의견", non_buy),
-                        ("📈 실적 컨센서스 상회", beat), ("📉 실적 컨센서스 하회", miss)]:
-        if rows:
-            out.append(B.toggle(f"{title} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
-
-    # 섹터별
-    sectors, macro = grouped(reports)
-    for heading, groups in [("🏭 섹터별", sectors), ("🌐 시장 · 매크로 · 채권", macro)]:
-        if not groups:
-            continue  # 해당 리포트가 없는 날은 빈 제목을 만들지 않음
-        out.append(B.h2(heading))
-        for g, rows in groups:
-            out.append(B.toggle(f"{g} ({len(rows)})", [B.bullet(report_line(r, urls.get(rkey(r)))) for r in rows]))
-
-    out.append(B.divider())
-    out.append(B.h2("✍️ My View"))
-    out.append(B.quote(B.rt("오늘 리포트를 읽고 든 생각, 동의하지 않는 부분, 추적할 포인트를 기록하세요.",
-                            color="gray", italic=True)))
+    hl = highlight_table(reports, urls)
+    if hl:
+        out.append(B.h2("🚩 하이라이트"))
+        out.append(hl)
     return out
+
+
+def my_view_blocks() -> list:
+    return [B.divider(), B.h2("✍️ My View"),
+            B.quote(B.rt("오늘 리포트를 읽고 든 생각, 동의하지 않는 부분, 추적할 포인트를 기록하세요.",
+                         color="gray", italic=True))]
+
+
+def report_row_props(r: dict, schema: dict = REPORT_DB_PROPS) -> dict:
+    ai = r.get("ai") or {}
+    props = {
+        "제목": B.p_title(report_title(r).rsplit(" · ", 1)[0]),  # 증권사는 별도 열
+        "섹터": B.p_select(group_of(r)),
+        "증권사": B.p_select(r["broker"]),
+        "의견·목표가": B.p_text(tp_short(r)),
+        "한줄 요약": B.p_text(ai.get("one_line")),
+    }
+    return {k: v for k, v in props.items() if k in schema}
 
 
 # ─────────────────────────── commands ───────────────────────────
@@ -281,46 +336,47 @@ def plain_title(props: dict) -> str:
     return "".join(t["text"]["content"] for t in props["제목"]["title"])
 
 
-def report_items(rows: list) -> list:
-    return [(rkey(r), report_title(r), CATEGORY_ICON.get(r["category"]), report_blocks(r)) for r in rows]
+def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, reports: list, digest: dict) -> int:
+    """날짜 페이지 1개 생성: 브리핑(+하이라이트 표) → 🏭 섹터별 DB → 🌐 시장·매크로·채권 DB → My View.
 
-
-def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, sections: list, make_briefing) -> int:
-    """날짜 페이지 1개 생성: 브리핑 → My View → 📑 리포트별 분석(섹터 그룹 제목 + 하위 페이지).
-
-    sections: [(그룹 이름, [(key, 제목, 아이콘, 본문 블록)])]
-    make_briefing(urls): 하위 페이지 URL(key→url)을 받아 브리핑 블록을 만드는 함수.
-    하위 페이지는 항상 부모 본문 맨 끝에 붙으므로, 자리표시 블록 하나로 페이지를 만들고 → 하위 페이지 생성
-    → 브리핑을 자리표시 바로 뒤에 끼워 넣은 뒤 자리표시 삭제 (브리핑 링크가 하위 페이지를 가리키도록).
+    인라인 DB는 항상 부모 본문 맨 끝에 붙으므로, 자리표시 블록 하나로 페이지를 만들고 → DB·행 생성
+    → My View 추가 → 브리핑을 자리표시 바로 뒤에 끼워 넣은 뒤 자리표시 삭제 (하이라이트 링크가 행을 가리키도록).
     반환: 실패한 리포트 수.
     """
     for p in nc.query_all(bdb, {"property": "날짜", "date": {"equals": date}}):
-        nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(하위 리포트 포함) 휴지통으로
-    n = sum(len(items) for _, items in sections)
-    day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {n}건 정리 중…", color="gray"))], icon="📰")
+        nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(안의 리포트 DB 포함) 휴지통으로
+    day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {len(reports)}건 정리 중…", color="gray"))],
+                         icon="📰")
     anchor = nc.list_children(day["id"])[0]["id"]
 
-    nc.append_children(day["id"], [B.divider(), B.h2("📑 리포트별 분석"),
-                                   B.para(B.rt("각 페이지를 열면 리포트별 AI 분석을 볼 수 있습니다.", color="gray"))])
+    sectors, macro = grouped(reports)
     urls, failed = {}, 0
-    for g, items in sections:
-        nc.append_children(day["id"], [B.h3(f"{g} ({len(items)})")])
-        for key, title, icon, blocks in items:
-            try:
-                urls[key] = nc.create_child_page(day["id"], B.rt(title[:2000]), blocks, icon=icon)["url"]
-            except Exception as e:  # noqa: BLE001
-                failed += 1
-                log.warning("✗ %s %s: %s", key, title, e)
+    for title, icon, groups, schema in [("섹터별 리포트", "🏭", sectors, REPORT_DB_PROPS),
+                                        ("시장 · 매크로 · 채권 리포트", "🌐", macro, MACRO_DB_PROPS)]:
+        if not groups:
+            continue
+        n = sum(len(rs) for _, rs in groups)
+        db = nc.create_database(day["id"], f"{title} ({n})", icon, schema)
+        for _, rs in groups:  # 섹터 순서대로 생성 → 기본 보기에서 섹터끼리 모여 보임
+            for r in rs:
+                try:
+                    row = nc.create_page(db["id"], report_row_props(r, schema), report_blocks(r),
+                                         icon=CATEGORY_ICON.get(r["category"]))
+                    urls[rkey(r)] = row["url"]
+                except Exception as e:  # noqa: BLE001
+                    failed += 1
+                    log.warning("✗ %s %s: %s", rkey(r), r["title"], e)
 
-    nc.append_children(day["id"], make_briefing(urls), after=anchor)
+    nc.append_children(day["id"], my_view_blocks())
+    nc.append_children(day["id"], briefing_blocks(date, reports, digest, urls), after=anchor)
     nc.request("DELETE", f"/blocks/{anchor}")  # 자리표시 문구 제거
-    log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", plain_title(props), n - failed, failed, day["url"])
+    log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", plain_title(props), len(reports) - failed, failed, day["url"])
     return failed
 
 
 def cmd_publish(nc, date: str, dry_run: bool) -> int:
     summaries = load_json(DATA / "summaries" / f"{date}.json", [])
-    raw = load_json(DATA / "reports" / f"{date}.json", [])
+    raw = load_json(DATA / "reports" / f"{date}.json", []) or summaries  # 결과 보관본만 있을 때도 게시 가능
     if not raw:
         log.info("%s 리포트 없음 (휴일 등) ─ 게시할 내용 없음", date)
         return 0
@@ -331,14 +387,11 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
     log.info("%s ─ 리포트 %d건 (AI 요약 %d건), 브리핑 AI 분석 %s",
              date, len(reports), sum(1 for r in reports if r.get("ai")), "있음" if digest else "없음")
 
-    sectors, macro = grouped(reports)
-    sections = [(g, report_items(rows)) for g, rows in sectors + macro]
-
     if dry_run:
         out = DATA / "notion_preview" / date
-        save_json(out / "reports.json", [{"group": g, "title": t, "children": blk}
-                                         for g, items in sections for _, t, _, blk in items])
-        save_json(out / "briefing.json", briefing_blocks(date, reports, digest, {}))
+        save_json(out / "reports.json", [{"properties": report_row_props(r), "children": report_blocks(r)}
+                                         for r in reports])
+        save_json(out / "briefing.json", briefing_blocks(date, reports, digest, {}) + my_view_blocks())
         log.info("dry-run: payload 저장 → %s", out.relative_to(ROOT))
         return 0
 
@@ -356,8 +409,7 @@ def cmd_publish(nc, date: str, dry_run: bool) -> int:
         "헤드라인": B.p_text((digest or {}).get("headline")),
         "요약": B.p_text((digest or {}).get("brief")),
     }
-    failed = publish_day(nc, ids["briefings_db_id"], date, props, sections,
-                         lambda urls: briefing_blocks(date, reports, digest, urls))
+    failed = publish_day(nc, ids["briefings_db_id"], date, props, reports, digest)
     return 1 if failed else 0
 
 

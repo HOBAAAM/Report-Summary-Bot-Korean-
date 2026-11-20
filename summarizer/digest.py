@@ -15,7 +15,7 @@ DIGEST_SYSTEM = """\
 - 개별 리포트를 나열하지 말고, 여러 증권사·섹터에 걸쳐 반복되는 테마와 시각 차이를 찾습니다.
 - 각 주장에는 근거가 된 리포트(증권사, 종목/제목)를 괄호로 짧게 밝힙니다.
 - 목록에 없는 사실이나 숫자를 만들어내지 않습니다.
-- 간결한 한국어 개조식으로 씁니다.
+- 간결한 한국어 개조식으로 씁니다. 노션에서 한 줄에 읽히도록 항목마다 정해진 글자 수를 지킵니다.
 """
 
 DIGEST_SCHEMA = _obj({
@@ -26,17 +26,18 @@ DIGEST_SCHEMA = _obj({
         "type": "array",
         "description": "여러 리포트에 걸친 핵심 테마 3~5개",
         "items": _obj({
-            "title": {"type": "string"},
-            "detail": {"type": "string", "description": "2~3문장, 근거 리포트 포함"},
+            "title": {"type": "string", "description": "테마 이름, 25자 이내"},
+            "detail": {"type": "string", "description": "한 문장 60자 이내, 근거 리포트(증권사) 괄호로"},
         }),
     },
-    "divergence": {**_str_list, "description": "같은 종목/섹터에 대해 증권사 간 시각이 갈린 부분"},
+    "divergence": {**_str_list, "description": "같은 종목/섹터에 대해 증권사 간 시각이 갈린 부분. 항목당 60자 이내"},
     "watch_list": {
         "type": "array",
         "description": "오늘 리포트 기준 주목할 종목 3~5개",
-        "items": _obj({"name": {"type": "string"}, "reason": {"type": "string"}}),
+        "items": _obj({"name": {"type": "string"},
+                       "reason": {"type": "string", "description": "40자 이내"}}),
     },
-    "risks": {**_str_list, "description": "여러 리포트가 공통으로 경고한 리스크"},
+    "risks": {**_str_list, "description": "여러 리포트가 공통으로 경고한 리스크. 항목당 50자 이내"},
 })
 
 
