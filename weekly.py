@@ -1,4 +1,6 @@
-"""주간 리포트: 한 주의 일간 요약(data/summaries/DATE.json)을 모아 '데일리 리포트' DB에 위클리 페이지 1개 게시.
+"""주간 리포트: 한 주의 일간 요약(data/summaries/DATE.json)을 모아 '위클리 리포트' DB에 페이지 1개 게시.
+
+위클리 DB는 메인 페이지(데일리 리포트 DB 아래)에 따로 있음 ─ 없으면 첫 실행 때 생성, id는 notion_ids.json.
 
     python weekly.py --start 2026-11-17 --end 2026-11-20            # 생성 + 게시
     python weekly.py --start 2026-11-17 --end 2026-11-20 --dry-run  # data/notion_preview/weekly-*.json
@@ -32,6 +34,25 @@ from summarizer.prompts import _obj, _str_list
 
 load_env()
 log = logging.getLogger("weekly")
+WEEKLY_DB_TITLE = "위클리 리포트"
+WEEKLY_DB_PROPS = {
+    "제목": {"title": {}},
+    "기간": {"date": {}},
+    "리포트 수": {"number": {}},
+    "목표가 상향": {"number": {}},
+    "목표가 하향": {"number": {}},
+    "헤드라인": {"rich_text": {}},
+    "요약": {"rich_text": {}},
+}
+
+
+def weekly_db(nc: NotionClient, ids: dict) -> str:
+    if not ids.get("weekly_db_id"):
+        db = nc.create_database(ids["parent_page_id"], WEEKLY_DB_TITLE, "🗓️", WEEKLY_DB_PROPS)
+        ids["weekly_db_id"] = db["id"]
+        save_json(IDS_FILE, ids)
+        log.info("위클리 DB 생성 → %s", db["url"])
+    return ids["weekly_db_id"]
 
 SYSTEM = """\
 당신은 증권사 리서치센터에서 주간 리서치 리뷰를 만드는 시니어 RA입니다. \
@@ -234,19 +255,19 @@ def main() -> int:
         log.info("dry-run: %s", out.relative_to(ROOT))
         return 0
 
-    bdb = ids["briefings_db_id"]
-    for old in nc.query_all(bdb, {"property": "제목", "title": {"equals": title}}):
+    wdb = weekly_db(nc, ids)
+    for old in nc.query_all(wdb, {"property": "제목", "title": {"equals": title}}):
         nc.archive_page(old["id"])  # 재실행: 같은 주 위클리 교체
     props = {
         "제목": B.p_title(title),
-        "날짜": {"date": {"start": args.start, "end": args.end}},
+        "기간": {"date": {"start": args.start, "end": args.end}},
         "리포트 수": B.p_number(len(reports)),
         "목표가 상향": B.p_number(sum(1 for r in comp if tp_group(r) == "상향")),
         "목표가 하향": B.p_number(sum(1 for r in comp if tp_group(r) == "하향")),
         "헤드라인": B.p_text(w["headline"]),
         "요약": B.p_text(w.get("brief")),
     }
-    page = nc.create_page(bdb, props, blocks, icon="🗓️")
+    page = nc.create_page(wdb, props, blocks, icon="🗓️")
     log.info("게시: %s → %s", title, page["url"])
     return 0
 
