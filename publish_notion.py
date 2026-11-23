@@ -237,21 +237,28 @@ def table(header: list, rows: list) -> dict:
                       "children": trs}}
 
 
+def tp_group(r: dict) -> str:
+    """목표가 분류 (네이버 직전 목표가 = 마지막 공개 리포트 대비): 상향/하향/유지/신규/미제시."""
+    if not r.get("goal_price"):
+        return "미제시"
+    if r.get("prev_goal_price") is None:
+        return "신규"
+    chg = r.get("goal_change_pct") or 0
+    return "상향" if chg > 0 else "하향" if chg < 0 else "유지"
+
+
+def day_filter(date: str) -> dict:
+    """데일리 페이지 찾기 ─ 같은 DB의 위클리 페이지(날짜 범위)는 제외."""
+    return {"and": [{"property": "날짜", "date": {"equals": date}},
+                    {"property": "제목", "title": {"does_not_contain": "위클리"}}]}
+
+
 def highlight_table(reports: list, urls: dict):
     """종목분석 전체를 목표가 기준으로 분류 (네이버 직전 목표가 = 마지막 공개 리포트 대비) → 표 1개.
 
     종목은 한 그룹에만 들어감. 해당 없으면 None.
     """
     comp = [r for r in reports if r["category"] == "company"]
-
-    def tp_group(r):
-        if not r.get("goal_price"):
-            return "미제시"
-        if r.get("prev_goal_price") is None:
-            return "신규"
-        chg = r.get("goal_change_pct") or 0
-        return "상향" if chg > 0 else "하향" if chg < 0 else "유지"
-
     by = defaultdict(list)
     for r in comp:
         by[tp_group(r)].append(r)
@@ -354,7 +361,7 @@ def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, reports: lis
     → My View 추가 → 브리핑을 자리표시 바로 뒤에 끼워 넣은 뒤 자리표시 삭제 (하이라이트 링크가 행을 가리키도록).
     반환: 실패한 리포트 수.
     """
-    for p in nc.query_all(bdb, {"property": "날짜", "date": {"equals": date}}):
+    for p in nc.query_all(bdb, day_filter(date)):
         nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(안의 리포트 DB 포함) 휴지통으로
     day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {len(reports)}건 정리 중…", color="gray"))],
                          icon="📰")
@@ -430,7 +437,7 @@ def cmd_exists(nc, date: str) -> int:
     if not ids:
         log.error("notion_ids.json 없음 ─ 먼저 --setup <페이지 링크> 실행")
         return 1
-    found = nc.query_all(ids["briefings_db_id"], {"property": "날짜", "date": {"equals": date}})
+    found = nc.query_all(ids["briefings_db_id"], day_filter(date))
     print("true" if found else "false")
     return 0
 
