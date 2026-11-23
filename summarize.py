@@ -188,6 +188,7 @@ class Run:
         try:
             digest = make_digest(list(self.done.values()), dcfg.get("model", "claude-sonnet-5-5"),
                                  dcfg.get("effort", "medium"))
+            digest["_based_on"] = len(self.done)  # 다시 돌릴 때 요약 건수가 늘었으면 브리핑도 새로 만듦
             save_json(self.digest_file, digest)
             log.info("데일리 브리핑 생성: %s", digest["headline"])
         except Exception as e:  # noqa: BLE001 — 브리핑 실패가 개별 요약을 무효화하진 않음
@@ -247,9 +248,11 @@ def main() -> int:
         log.warning("⚠️ %s 누적 비용 $%.2f 가 일 예산 $%.2f 를 넘었습니다. config.yaml routes 조정 필요",
                     args.date, day_cost, budget)
 
-    # 브리핑: 그날 처음 한 번만 생성 (오후 보충 실행은 아침 브리핑을 유지)
-    if not args.limit and run.done and not run.digest_file.exists():
-        run.write_digest()
+    # 브리핑: 처음 실행이거나, 같은 날 다시 돌려 요약 건수가 바뀌었을 때만 (새로) 생성
+    if not args.limit and run.done:
+        old = load_json(run.digest_file, None) if run.digest_file.exists() else None
+        if not old or old.get("_based_on") != len(run.done):
+            run.write_digest()
     return 1 if run.fail and not run.ok else 0
 
 
