@@ -48,7 +48,7 @@ WEEKLY_DB_PROPS = {
 
 def weekly_db(nc: NotionClient, ids: dict) -> str:
     if not ids.get("weekly_db_id"):
-        db = nc.create_database(ids["parent_page_id"], WEEKLY_DB_TITLE, "🗓️", WEEKLY_DB_PROPS)
+        db = nc.create_database(ids["parent_page_id"], WEEKLY_DB_TITLE, "📰", WEEKLY_DB_PROPS)
         ids["weekly_db_id"] = db["id"]
         save_json(IDS_FILE, ids)
         log.info("위클리 DB 생성 → %s", db["url"])
@@ -267,7 +267,7 @@ def main() -> int:
         "헤드라인": B.p_text(w["headline"]),
         "요약": B.p_text(w.get("brief")),
     }
-    page = nc.create_page(wdb, props, blocks, icon="🗓️")
+    page = nc.create_page(wdb, props, blocks, icon="📰")
     log.info("게시: %s → %s", title, page["url"])
     return 0
 

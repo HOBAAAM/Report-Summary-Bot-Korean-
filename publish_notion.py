@@ -344,7 +344,7 @@ def report_row_props(r: dict, schema: dict = REPORT_DB_PROPS) -> dict:
 def cmd_setup(nc: NotionClient, page: str) -> None:
     parent = parse_page_id(page)
     nc.get_page(parent)  # 연결(Connections) 안 됐으면 여기서 404
-    bdb = nc.create_database(parent, DB_TITLE, "🗓️", BRIEFING_DB_PROPS)
+    bdb = nc.create_database(parent, DB_TITLE, "🗞️", BRIEFING_DB_PROPS)
     ids = {"parent_page_id": parent, "briefings_db_id": bdb["id"]}
     save_json(IDS_FILE, ids)
     log.info("생성 완료 → %s\n  데일리 리포트 DB: %s", IDS_FILE.name, bdb["url"])
@@ -364,7 +364,7 @@ def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, reports: lis
     for p in nc.query_all(bdb, day_filter(date)):
         nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(안의 리포트 DB 포함) 휴지통으로
     day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {len(reports)}건 정리 중…", color="gray"))],
-                         icon="📰")
+                         icon="🗞️")
     anchor = nc.list_children(day["id"])[0]["id"]
 
     sectors, macro = grouped(reports)
