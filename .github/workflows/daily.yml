@@ -58,9 +58,11 @@ jobs:
           key: data-${{ env.DATE }}-${{ github.run_id }}
           restore-keys: data-${{ env.DATE }}-
 
-      - name: 예비 실행이면 기존 게시 여부 확인
+      # 예약 실행은 몇 시간씩 늦게 도는 경우가 있음 (11/24·25 저녁에 실행됨) → 이미 게시돼 있으면
+      # 다시 게시하지 않음 (낮에 쓴 My View 메모가 지워지는 것 방지). 수동 실행은 항상 다시 게시.
+      - name: 예약 실행이면 기존 게시 여부 확인
         id: check
-        if: github.event_name == 'schedule' && github.event.schedule == '50 1 * * 1-5'
+        if: github.event_name == 'schedule'
         run: |
           EXISTS=$(python publish_notion.py --exists --date "$DATE")
           echo "skip=$EXISTS" >> "$GITHUB_OUTPUT"
