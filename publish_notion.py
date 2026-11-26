@@ -322,10 +322,62 @@ def briefing_blocks(date: str, reports: list, digest: dict, urls: dict) -> list:
     return out
 
 
-def my_view_blocks() -> list:
-    return [B.divider(), B.h2("✍️ My View"),
-            B.quote(B.rt("오늘 리포트를 읽고 든 생각, 동의하지 않는 부분, 추적할 포인트를 기록하세요.",
-                         color="gray", italic=True))]
+MY_VIEW_PLACEHOLDER = "오늘 리포트를 읽고 든 생각, 동의하지 않는 부분, 추적할 포인트를 기록하세요."
+_COPYABLE = {"paragraph", "quote", "bulleted_list_item", "numbered_list_item", "heading_1", "heading_2",
+             "heading_3", "to_do", "toggle", "callout", "divider"}
+
+
+def my_view_blocks(saved: list = None) -> list:
+    return [B.divider(), B.h2("✍️ My View")] + (saved or [
+        B.quote(B.rt(MY_VIEW_PLACEHOLDER, color="gray", italic=True))])
+
+
+def _plain(b: dict) -> str:
+    return "".join(t["plain_text"] for t in b.get(b["type"], {}).get("rich_text", []))
+
+
+def _copy_block(nc: NotionClient, b: dict):
+    """기존 블록을 새로 만들 수 있는 형태로 복사 (하위 블록 포함). 지원 안 하는 종류는 None."""
+    t = b["type"]
+    if t not in _COPYABLE:
+        return None
+    if t == "divider":
+        return B.divider()
+    src = b[t]
+    data = {"rich_text": [{"type": "text",
+                           "text": {"content": x["plain_text"], **({"link": {"url": x["href"]}} if x.get("href") else {})},
+                           "annotations": x["annotations"]} for x in src.get("rich_text", [])]}
+    for k in ("color", "checked"):
+        if src.get(k) is not None:
+            data[k] = src[k]
+    if t == "callout" and (src.get("icon") or {}).get("type") == "emoji":
+        data["icon"] = src["icon"]
+    if b.get("has_children"):
+        kids = [c for c in (_copy_block(nc, k) for k in nc.list_children(b["id"])) if c]
+        if kids:
+            data["children"] = kids
+    return {"object": "block", "type": t, t: data}
+
+
+def saved_my_view(nc: NotionClient, page_id: str) -> list:
+    """기존 날짜 페이지의 My View 아래 사용자 메모(하위 줄 포함)를 복사. 안내 문구만 있으면 []."""
+    kids = nc.list_children(page_id)
+    i = next((k for k, b in enumerate(kids) if b["type"] == "heading_2" and "My View" in _plain(b)), None)
+    if i is None:
+        return []
+    rest = kids[i + 1:]
+    while rest and rest[-1]["type"] == "paragraph" and not _plain(rest[-1]) and not rest[-1].get("has_children"):
+        rest = rest[:-1]  # 끝의 빈 줄
+    if all(MY_VIEW_PLACEHOLDER in _plain(b) and not b.get("has_children") for b in rest):
+        return []
+    out = []
+    for b in rest:
+        c = _copy_block(nc, b)
+        if c:
+            out.append(c)
+        else:
+            log.warning("My View의 '%s' 블록은 옮기지 못함 (이전 페이지는 휴지통에 있음)", b["type"])
+    return out
 
 
 def report_row_props(r: dict, schema: dict = REPORT_DB_PROPS) -> dict:
@@ -361,8 +413,12 @@ def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, reports: lis
     → My View 추가 → 브리핑을 자리표시 바로 뒤에 끼워 넣은 뒤 자리표시 삭제 (하이라이트 링크가 행을 가리키도록).
     반환: 실패한 리포트 수.
     """
+    saved = []
     for p in nc.query_all(bdb, day_filter(date)):
+        saved = saved or saved_my_view(nc, p["id"])  # 재실행해도 직접 쓴 My View는 그대로 옮김
         nc.archive_page(p["id"])  # 재실행: 기존 날짜 페이지(안의 리포트 DB 포함) 휴지통으로
+    if saved:
+        log.info("My View 메모 %d블록을 새 페이지로 옮김", len(saved))
     day = nc.create_page(bdb, props, [B.para(B.rt(f"리포트 {len(reports)}건 정리 중…", color="gray"))],
                          icon="🗞️")
     anchor = nc.list_children(day["id"])[0]["id"]
@@ -385,7 +441,7 @@ def publish_day(nc: NotionClient, bdb: str, date: str, props: dict, reports: lis
                     failed += 1
                     log.warning("✗ %s %s: %s", rkey(r), r["title"], e)
 
-    nc.append_children(day["id"], my_view_blocks())
+    nc.append_children(day["id"], my_view_blocks(saved))
     nc.append_children(day["id"], briefing_blocks(date, reports, digest, urls), after=anchor)
     nc.request("DELETE", f"/blocks/{anchor}")  # 자리표시 문구 제거
     log.info("게시: %s ─ 리포트 %d건 (실패 %d) → %s", plain_title(props), len(reports) - failed, failed, day["url"])
